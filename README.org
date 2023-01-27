@@ -1,0 +1,51 @@
+* yarn
+
+Transient Interface For Yarn Classic.
+
+** Installation
+
+Emacs >= 28.1 is required.
+
+*** Manual
+
+Ensure that you have installed required dependencies:
+- ivy (optional)
+- counsel (optional)
+- vterm (optional)
+  
+Download the source code and put it wherever you like, e.g. into =~/.emacs.d/yarn/=
+
+#+begin_src shell :eval no
+git clone https://github.com/KarimAziev/yarn.git ~/.emacs.d/yarn/
+#+end_src
+
+Add the downloaded directory to the load path:
+
+#+begin_src elisp :eval no
+(add-to-list 'load-path "~/.emacs.d/yarn/")
+(require 'yarn)
+#+end_src
+
+
+#+begin_src elisp :eval no
+
+(use-package yarn
+  :straight (yarn
+             :repo "KarimAziev/yarn"
+             :type git
+             :host github))
+
+#+end_src
+
+** Usage
+
+~M-x yarn-menu~ - menu with available commands.
+
+** Customization
+
+*** ~yarn-use-vterm~
+Whether to execute commands in vterm, if installed.
+*** ~yarn-use-nvm~
+Whether to prepend nvm-use to command if .nvmrc exists.
+*** ~yarn-global-config-directory~
+The path to the yarn config.
