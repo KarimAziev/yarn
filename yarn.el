@@ -38,10 +38,6 @@
 ;; a variable `yarn-use-nvm' is non-nil and nvm installed,
 ;; execute nvm-use before running command.
 
-;; If vterm is installed and the value of variable
-;; `yarn-use-vterm' is non-nil, run command in `vterm',
-;; otherwise with `async-shell-command'.
-
 ;;
 ;; Customization
 
@@ -50,9 +46,6 @@
 
 ;; `yarn-use-nvm'
 ;;     Whether to execute nvm-use if .nvmrc exists and nvm installed.
-
-;; `yarn-use-vterm'
-;;     Whether to run commands in `vterm', if installed.
 
 ;;; Commands
 
@@ -119,9 +112,6 @@
 
 ;;; Customization
 
-;; `yarn-use-vterm'
-;;      Whether to execute commands in vterm, if installed.
-
 ;; `yarn-use-nvm'
 ;;      Whether to prepend nvm-use to command if .nvmrc exists.
 
@@ -134,9 +124,124 @@
 
 (require 'json)
 
-
 (require 'transient)
 (declare-function vterm "ext:vterm")
+(require 'compile)
+
+(defconst yarn-nvm-version-re
+  "v[0-9]+\.[0-9]+\.[0-9]+"
+  "Regex matching a Node version.")
+
+(defcustom yarn-nvm-dir (or (getenv "NVM_DIR")
+                            (expand-file-name "~/.nvm"))
+  "Full path to Nvm installation directory."
+  :group 'nvm
+  :type 'directory)
+
+
+
+(defun yarn-nvm--version-name (runtime path)
+  "Make RUNTIME names match those in nvm PATH ls."
+  (if (string= "node" runtime)
+      (file-name-nondirectory (directory-file-name path))
+    (concat (replace-regexp-in-string
+             (regexp-quote "io.js")
+             "iojs"
+             (file-name-nondirectory
+              (directory-file-name runtime)))
+            "-"
+            (file-name-nondirectory
+             (directory-file-name
+              path)))))
+
+(defun yarn-nvm--installed-versions-dirs ()
+  "Return list of directories with installed versions of node."
+  (let* ((files (mapcan
+                 (lambda (versions-dir)
+                   (directory-files versions-dir t
+                                    directory-files-no-dot-files-regexp))
+                 (delq nil
+                       (append
+                        (list (yarn-expand-when-exists
+                               yarn-nvm-dir))
+                        (list (yarn-expand-when-exists
+                               "versions"
+                               yarn-nvm-dir)))))))
+    (mapcan
+     (lambda (it)
+       (when-let ((name (when (file-directory-p it)
+                          (file-name-nondirectory
+                           (directory-file-name
+                            it)))))
+         (if (string-match-p (concat yarn-nvm-version-re "$")
+                             name)
+             (list it)
+           (directory-files it t yarn-nvm-version-re))))
+     files)))
+
+(defun yarn-nvm--installed-versions ()
+  "Return list of directories with installed versions of node."
+  (mapcar (lambda (it)
+            (cons (file-name-nondirectory it) it))
+          (yarn-nvm--installed-versions-dirs)))
+
+(defun yarn-nvm--version-from-string (version-string)
+  "Split a VERSION-STRING into a list of (major, minor, patch) numbers."
+  (mapcar 'string-to-number (split-string version-string "[^0-9]" t)))
+
+(defun yarn-nvm--version-match-p (matcher version)
+  "Does this VERSION satisfy the requirements in MATCHER?"
+  (or (eq (car matcher) nil)
+      (and (eq (car matcher)
+               (car version))
+           (yarn-nvm--version-match-p (cdr matcher)
+                                      (cdr version)))))
+
+(defun yarn-nvm-version-compare (a b)
+  "Comparator for sorting NVM versions, return t if A < B."
+  (if (eq (car a)
+          (car b))
+      (yarn-nvm-version-compare (cdr a)
+                                (cdr b))
+    (< (car a)
+       (car b))))
+
+(defun yarn-nvm-find-exact-version-for (short)
+  "Find most suitable version for SHORT.
+
+SHORT is a string containing major and optionally minor version.
+This function will return the most recent version whose major
+and (if supplied, minor) match."
+  (when (and short
+             (string-match-p "v?[0-9]+\\(\.[0-9]+\\(\.[0-9]+\\)?\\)?$" short))
+    (unless (or (string-prefix-p "v" short)
+                (string-prefix-p "node" short)
+                (string-prefix-p "iojs" short))
+      (setq short (concat "v" short)))
+    (let* ((versions (yarn-nvm--installed-versions))
+           (requested (yarn-nvm--version-from-string short))
+           (first-version
+            (seq-find (lambda (it)
+                        (string= (car it) short))
+                      versions)))
+      (or
+       first-version
+       (let ((possible-versions
+              (seq-filter
+               (lambda (version)
+                 (yarn-nvm--version-match-p
+                  requested
+                  (yarn-nvm--version-from-string (car version))))
+               versions)))
+         (if (eq possible-versions nil)
+             nil
+           (car (sort possible-versions
+                      (lambda (a b)
+                        (not (yarn-nvm-version-compare
+                              (yarn-nvm--version-from-string (car a))
+                              (yarn-nvm--version-from-string (car b)))))))))))))
+
+
 (declare-function vterm--invalidate "ext:vterm")
 (declare-function vterm-send-string "ext:vterm")
 
@@ -150,14 +255,24 @@
   :group 'yarn)
 
 (defcustom yarn-use-nvm nil
-  "Whether to prepend nvm-use to command if .nvmrc exists."
+  "Whether to prepend `nvm-use' to command if .nvmrc exists."
   :type 'boolean
   :group 'yarn)
 
-(defcustom yarn-use-vterm t
-  "Whether to execute commands in vterm, if installed."
-  :type 'boolean
-  :group 'yarn)
+(defcustom yarn-common-buffer-name-function 'yarn-common-create-unique-buffer-name
+  "Buffer name for `npm' command, or function which return buffer name.
+The function takes three arguments, ROOT, NPM-COMMAND, ARGS.
+ROOT is project root directory.  NPM-COMMAND is npm command string.
+ARGS is list of arguments passed to npm command.
+
+You can use `yarn-common-create-unique-buffer-name' to use unique buffer name
+among all sesstions."
+  :group 'yarn
+  :type '(choice
+          (string :tag "Use same buffer through all sessions")
+          (const :tag "Use unique buffer name among all sessions"
+                 yarn-common-create-unique-buffer-name)
+          function))
 
 (defvar yarn-json-hash (make-hash-table :test 'equal))
 
@@ -232,15 +347,13 @@ INITIAL-INPUT can be given as the initial minibuffer input."
           (car (split-string result nil t))))
     (read-string "Dependency: ")))
 
-(defun yarn-get-nvm-node-version (&optional project)
-  "Return string with version in PROJECT .nvmrc file."
-  (when-let ((nvmrc (yarn-expand-when-exists
-                     ".nvmrc" (or project
-                                  (yarn-get-project-root)))))
-    (with-temp-buffer (insert-file-contents nvmrc)
-                      (string-trim
-                       (buffer-substring-no-properties (point-min)
-                                                       (point-max))))))
+(defun yarn-get-nvm-node-version ()
+  "Lookup and read .nvmrc file."
+  (when-let ((nvmrc (locate-dominating-file default-directory ".nvmrc")))
+    (with-temp-buffer (insert-file-contents (expand-file-name ".nvmrc" nvmrc))
+                      (string-trim (buffer-substring-no-properties (point-min)
+                                                                   (point-max))))))
+
 
 (defun yarn-exec-with-args (command &rest args)
   "Run a shell COMMAND with ARGS."
@@ -270,10 +383,10 @@ INITIAL-INPUT can be given as the initial minibuffer input."
                                 "[\r\f\n]" t)))
     versions))
 
-(defun yarn-ensure-nvm-node-installed (&optional project force)
+(defun yarn-ensure-nvm-node-installed (&optional force)
   "Install node version specified in nvmrc file of PROJECT.
 If FORCE is non nil, install it even if it is installed."
-  (when-let ((nvm-node-version (yarn-get-nvm-node-version project)))
+  (when-let ((nvm-node-version (yarn-get-nvm-node-version)))
     (let ((regex (regexp-quote nvm-node-version))
           (versions (yarn-nvm-installed-node-versions)))
       (when (and
@@ -285,21 +398,18 @@ If FORCE is non nil, install it even if it is installed."
                "This project requires node %s, which is not installed. Install?"
                nvm-node-version)))
         (yarn-nvm-command "install"
-                              nvm-node-version
-                              "--reinstall-packages-from=current")))))
+                          nvm-node-version
+                          "--reinstall-packages-from=current")))))
 
-(defun yarn-ensure-nvm-use (command &optional project)
+(defun yarn-ensure-nvm-use (command)
   "If PROJECT can use nvm, prepend to COMMAND nvm use."
   (if-let ((nvm-path (and
                       yarn-use-nvm
-                      (yarn-expand-when-exists
-                       ".nvmrc" (or project
-                                    (yarn-get-project-root)))
+                      (yarn-get-nvm-node-version)
                       (yarn-nvm-path))))
-      (progn (yarn-ensure-nvm-node-installed project)
+      (progn (yarn-ensure-nvm-node-installed)
              (concat "source " nvm-path " && nvm use && " command))
     command))
-
 
 (defun yarn-expand-when-exists (filename &optional directory)
   "Expand FILENAME to DIRECTORY and return result if exists."
@@ -309,10 +419,10 @@ If FORCE is non nil, install it even if it is installed."
 
 (defun yarn-nvm-path ()
   "Return path to NVM_DIR if exists."
-  (when-let* ((nvm-dir (or (getenv "NVM_DIR")
+  (when-let* ((yarn-nvm-dir (or (getenv "NVM_DIR")
                            (when (file-exists-p "~/.nvm/")
                              "~/.nvm/")))
-              (file (expand-file-name "nvm.sh" nvm-dir)))
+              (file (expand-file-name "nvm.sh" yarn-nvm-dir)))
     (when (file-exists-p file)
       file)))
 
@@ -608,6 +718,83 @@ X can be any object."
             (display-sort-function . ,display-sort-fn))
         (complete-with-action action alist str pred)))))
 
+(defun yarn-common-create-unique-buffer-name (root npm-command)
+  "Create buffer name unique to ROOT and NPM-COMMAND."
+  (concat "*" npm-command " in " root "*"))
+
+(defun yarn-common--generate-buffer-name-function (root npm-command)
+  "Generate function which return buffer name to pass `compilation-start'.
+ROOT is project root directory.  NPM-COMMAND is npm command string.
+ARGS is list of arguments passed to npm command.
+
+This function uses `yarn-common-buffer-name-function'."
+  (if (stringp yarn-common-buffer-name-function)
+      yarn-common-buffer-name-function
+    (funcall yarn-common-buffer-name-function
+             root npm-command)))
+
+(defun yarn-compile-get-new-env (version)
+  "Return alist of new environment for node VERSION."
+  (when-let* ((version-path (cdr (yarn-nvm-find-exact-version-for version))))
+    (let* ((env-flags
+            (mapcar
+             (lambda (it)
+               (cons
+                (car it)
+                (concat version-path "/" (cdr it))))
+             '(("NVM_BIN" . "bin")
+               ("NVM_PATH" . "lib/node")
+               ("NVM_INC" . "include/node"))))
+           (path-re (concat "^"
+                            (concat (or (getenv "NVM_DIR")
+                                        (expand-file-name "~/.nvm"))
+                                    "/\\(?:versions/node/\\|versions/io.js/\\)?")
+                            "v[0-9]+\.[0-9]+\.[0-9]+" "/bin/?$"))
+           (new-bin-path (expand-file-name  "bin/" version-path))
+           (paths
+            (cons
+             new-bin-path
+             (seq-remove
+              (lambda (path)
+                (if path (string-match-p path-re path) t))
+              (parse-colon-path (getenv "PATH")))))
+           (new-path (cons "PATH" (string-join paths path-separator)))
+           (flags (append env-flags (list new-path)))
+           (regexp (mapconcat 'identity (mapcar 'car flags) "\\|")))
+      (append (mapcar (lambda (it)
+                        (concat (car it) "=" (cdr it)))
+                      flags)
+              (seq-remove (apply-partially 'string-match-p regexp)
+                          process-environment)))))
+
+(defun yarn-compile (npm-command &rest args)
+  "Generic compile command for NPM-COMMAND with ARGS functionality."
+  (when args
+    (setq npm-command (concat npm-command
+                              " "
+                              (mapconcat (lambda (i)
+                                           (unless (stringp i)
+                                             (setq i (format "%s" i)))
+                                           (string-trim i))
+                                         (delq nil (flatten-list args))))))
+  (let ((compenv (let* ((nvm-version (yarn-get-nvm-node-version))
+                        (env (when nvm-version (yarn-compile-get-new-env
+                                                nvm-version))))
+                   (or env
+                       (when (and (not env) nvm-version)
+                         (prog1 process-environment
+                           (minibuffer-message
+                            "Warning: Mismatched node version"))))))
+        (buff-name (yarn-common--generate-buffer-name-function
+                    (yarn-get-project-root) npm-command)))
+    (with-current-buffer (get-buffer-create buff-name)
+      (let* ((command npm-command)
+             (compilation-read-command nil)
+             (compilation-environment compenv)
+             (compile-command command))
+        (funcall-interactively #'compile command t)))))
+
+
 ;;;###autoload
 (defun yarn-unlink ()
   "Unlink and reinstall linked package in current project."
@@ -620,11 +807,12 @@ X can be any object."
                                   (if (member current-project-name global-links)
                                       (nconc (list "self") linked-packages)
                                     linked-packages)))
-    (pcase choice
-      ("self" "")
-      ((pred stringp)
-       (concat choice " && yarn install --force"))
-      (_ " && yarn install --force"))))
+    (yarn-compile "yarn unlink"
+                  (pcase choice
+                    ("self" "")
+                    ((pred stringp)
+                     (concat choice " && yarn install --force"))
+                    (_ " && yarn install --force")))))
 
 ;;;###autoload
 (defun yarn-add-read-dependency (&optional initial-input)
@@ -769,15 +957,13 @@ INITIAL-INPUT can be given as the initial minibuffer input."
 
 (defun yarn-run-command (command &optional project)
   "Run COMMAND in PROJECT using vterm or asynchronously."
-  (let ((project (or project
-                     (when-let ((package-json-file
-                                 (yarn-get-package-json-path)))
-                       (file-name-directory package-json-file))
-                     (vc-root-dir))))
-    (if (and yarn-use-vterm
-             (require 'vterm nil t))
-        (yarn-run-in-vterm project command)
-      (yarn-run-async-shell-command project command))))
+  (let ((default-directory (or project
+                               (when-let ((package-json-file
+                                           (yarn-get-package-json-path)))
+                                 (file-name-directory package-json-file))
+                               (vc-root-dir)
+                               default-directory)))
+    (yarn-compile command)))
 
 ;;;###autoload
 (defun yarn-done ()
@@ -830,10 +1016,9 @@ INITIAL-INPUT can be given as the initial minibuffer input."
                      (flatten-list args)
                      "\s")))
     (yarn-run-command (read-string "Run: "
-                                   (yarn-ensure-nvm-use
-                                    (string-join
-                                     (list (string-trim cmd) formatted-args)
-                                     " "))))))
+                                   (string-join
+                                    (list (string-trim cmd) formatted-args)
+                                    " ")))))
 
 (transient-define-argument yarn-level-options ()
   :class 'transient-switches
@@ -874,17 +1059,20 @@ INITIAL-INPUT can be given as the initial minibuffer input."
   "Command dispatcher for yarn audit options."
   (interactive)
   (yarn-run-command (read-string "Run: "
-                                     (yarn-ensure-nvm-use
-                                      "yarn bin"))))
+                                 "yarn bin")))
 
 ;;;###autoload
 (defun yarn-jump-to-cache-dir ()
   "Jump to yarn cache dir."
   (interactive)
-  (let ((dir (string-trim (shell-command-to-string
-                           "yarn cache dir"))))
+  (let ((dir (car (last (split-string
+                         (string-trim (shell-command-to-string
+                                       "yarn cache dir"))
+                         "\n"
+                         t)))))
     (when (file-exists-p dir)
       (find-file dir))))
+
 ;;;###autoload (autoload 'yarn-install "yarn-yarn.el" nil t)
 (transient-define-prefix yarn-install ()
   "Command dispatcher for yarn install options."
@@ -1038,24 +1226,21 @@ With argument GLOBAL is non nil, globally."
   "Command dispatcher for yarn generate-lock-entry."
   (interactive)
   (yarn-run-command (read-string "Run: "
-                                     (yarn-ensure-nvm-use
-                                      "yarn generate-lock-entry"))))
+                                 "yarn generate-lock-entry")))
 
 ;;;###autoload
 (defun yarn-help ()
   "Command dispatcher for yarn generate-lock-entry."
   (interactive)
   (yarn-run-command (read-string "Run: "
-                                     (yarn-ensure-nvm-use
-                                      "yarn help"))))
+                                     "yarn help")))
 
 ;;;###autoload
 (defun yarn-import ()
   "Command dispatcher for yarn import."
   (interactive)
   (yarn-run-command (read-string "Run: "
-                                     (yarn-ensure-nvm-use
-                                      "yarn import"))))
+                                 "yarn import")))
 
 ;;;###autoload
 (defun yarn-licences ()
@@ -1075,8 +1260,8 @@ With argument GLOBAL is non nil, globally."
   "Command dispatcher for yarn versions."
   (interactive)
   (yarn-run-command (read-string "Run: "
-                                     (yarn-ensure-nvm-use
-                                      "yarn versions"))))
+                                 "yarn versions")))
+
 ;;;###autoload (autoload 'yarn-list "yarn-yarn.el" nil t)
 (transient-define-prefix yarn-list ()
   "Command dispatcher for yarn list."
@@ -1084,9 +1269,9 @@ With argument GLOBAL is non nil, globally."
    [("p" "pattern" "--pattern " :class transient-option)
     ("d" "depth" "--depth="
      :class transient-option
-     :reader transient-read-number-N0
-     :prompt "Path: ")]]
+     :reader transient-read-number-N0)]]
   [("RET" "Run" yarn-done)])
+
 ;;;###autoload (autoload 'yarn-init "yarn-yarn.el" nil t)
 (transient-define-prefix yarn-init ()
   "Command dispatcher for yarn init."
@@ -1154,11 +1339,9 @@ With argument GLOBAL is non nil, globally."
 (defun yarn-run ()
   "Command dispatcher for yarn run."
   (interactive)
-  (let ((script (completing-read "Run: " (append (yarn-get-current-scripts)
-                                                 (list "env")))))
+  (let ((script (completing-read "Run: " (yarn-get-current-scripts))))
     (yarn-run-command (read-string "Run: "
-                                       (yarn-ensure-nvm-use
-                                        (concat "yarn run " script))))))
+                                   (concat "yarn run " script)))))
 
 (transient-define-argument yarn-version-type-options ()
   :class 'transient-switches
@@ -1214,6 +1397,40 @@ With argument GLOBAL is non nil, globally."
                                      (yarn-ensure-nvm-use
                                       "yarn outdated"))))
 
+(transient-define-argument yarn-access-type-options ()
+  :class 'transient-switches
+  :argument-format "--access %s"
+  :argument-regexp "public\\|restricted"
+  :choices '("public" "restricted"))
+
+(transient-define-prefix yarn-publish ()
+  "Open yarn publish transient menu pop up."
+  ["Arguments"
+   ("-v"
+    "Skips the prompt for new version by using the value of version instead"
+    "--new-version " :class transient-option)
+   ("a" "set package access for other users on the registry"
+    yarn-access-type-options)
+   ("-o" "one-time password" "--otp " :class transient-option)
+   ("-t" "set tag" "--tag " :class transient-option)]
+  [["Command"
+    ("p" "Publish"       yarn-done)]])
+
+;;;###autoload
+(defun yarn-login ()
+  "Run yarn login."
+  (interactive)
+  (yarn-run-command (read-string "Run: "
+                                 (yarn-ensure-nvm-use
+                                  "yarn login"))))
+
+;;;###autoload
+(defun yarn-logout ()
+  "Run yarn logout."
+  (interactive)
+  (yarn-run-command (read-string "Run: "
+                                 (yarn-ensure-nvm-use
+                                  "yarn logout"))))
 
 ;;;###autoload (autoload 'yarn-menu "yarn" nil t)
 (transient-define-prefix yarn-menu ()
@@ -1231,30 +1448,30 @@ With argument GLOBAL is non nil, globally."
     ("h" "help" yarn-help)
     ("im" "import" yarn-import)
     ("if" "info" yarn-info)
-    ("ii" "init" yarn-init)
+    ("I" "init" yarn-init)
     ("in" "install" yarn-install)]
    [("ru" "run script" yarn-run)
-    ("li" "licenses" yarn-licences)
-    ("lk" "link" yarn-link)
+    ("li" "link" yarn-link)
     ("ls" "list" yarn-list)
-    ("ln" "login" transient-inapt  :inapt-if (lambda () t))
-    ("lo" "logout" transient-inapt  :inapt-if (lambda () t))
+    ("lc" "licenses" yarn-licences)
+    ("ln" "login" yarn-login)
+    ("lo" "logout" yarn-logout)
     ("ou" "outdated" yarn-outdated)
     ("ow" "owner" yarn-owner)
     ("pa" "pack" yarn-pack)
     ("po" "policies" transient-inapt :inapt-if (lambda () t))
-    ("pu" "publish" transient-inapt  :inapt-if (lambda () t))
+    ("pu" "publish" yarn-publish)
     ("re" "remove" yarn-remove)
     ("ta" "tag" transient-inapt :inapt-if (lambda () t))]
    [("te" "team" transient-inapt  :inapt-if (lambda () t))
-    ("uk" "unlink" yarn-unlink)
+    ("un" "unlink" yarn-unlink)
     ("up" "upgrade" yarn-upgrade)
     ("ui" "upgrade-interactive" yarn-upgrade-interactive)
     ("ug" "unplug" transient-inapt  :inapt-if (lambda () t))
     ("v" "version" yarn-version)
     ("V" "versions" yarn-versions)
-    ("wy" "why" yarn-why)
-    ("wk" "workspace" transient-inapt :inapt-if (lambda () t))
+    ("wh" "why" yarn-why)
+    ("wr" "workspace" transient-inapt :inapt-if (lambda () t))
     ("ws" "workspaces" transient-inapt :inapt-if (lambda () t))]])
 
 (provide 'yarn)

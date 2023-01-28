@@ -42,9 +42,6 @@ Add the downloaded directory to the load path:
 ~M-x yarn-menu~ - menu with available commands.
 
 ** Customization
-
-*** ~yarn-use-vterm~
-Whether to execute commands in vterm, if installed.
 *** ~yarn-use-nvm~
 Whether to prepend nvm-use to command if .nvmrc exists.
 *** ~yarn-global-config-directory~
