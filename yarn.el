@@ -1023,9 +1023,9 @@ INITIAL-INPUT can be given as the initial minibuffer input."
 (transient-define-argument yarn-level-options ()
   :class 'transient-switches
   :always-read t
-  :argument-format "%s"
-  :argument-regexp "add\\|list\\|remove"
-  :choices '("add" "list" "remove"))
+  :argument-format "--level %s"
+  :argument-regexp "info\\|low\\|moderate\\|high\\|critical"
+  :choices '("info" "low" "moderate" "high" "critical"))
 
 ;;;###autoload (autoload 'yarn-audit "yarn-yarn.el" nil t)
 (transient-define-prefix yarn-audit ()
@@ -1206,6 +1206,10 @@ With argument GLOBAL is non nil, globally."
 (transient-define-argument yarn-global-argument ()
   :class 'transient-switches
   :always-read t
+  :init-value (lambda (ob)
+                (when (not (slot-value ob 'value))
+                  (setf (slot-value ob 'value)
+                        "list")))
   :argument-format "%s"
   :argument-regexp "add\\|bin\\|list\\|remove\\|upgrade"
   :choices '("add" "bin" "list" "remove" "upgrade"))
