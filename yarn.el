@@ -132,13 +132,10 @@
   "v[0-9]+\.[0-9]+\.[0-9]+"
   "Regex matching a Node version.")
 
-(defcustom yarn-nvm-dir (or (getenv "NVM_DIR")
-                            (expand-file-name "~/.nvm"))
+(defcustom yarn-nvm-dir (expand-file-name "~/.nvm")
   "Full path to Nvm installation directory."
   :group 'nvm
   :type 'directory)
-
-
 
 (defun yarn-nvm--version-name (runtime path)
   "Make RUNTIME names match those in nvm PATH ls."
@@ -602,6 +599,34 @@ Return list of strings, propertized with :description."
                                     (cdr it))))
             scripts)))
 
+(defun yarn-read-package-json-script ()
+  "Get current project scripts from package.json.
+Return list of strings, propertized with :description."
+  (when-let* ((package-json-path (yarn-get-package-json-path))
+              (package-json (yarn-read-json package-json-path 'alist))
+              (scripts (alist-get 'scripts package-json)))
+    (let ((annotf
+           (lambda (it)
+             (concat ": "
+                     (cdr
+                      (assoc
+                       (intern
+                        it)
+                       scripts))))))
+      (completing-read "Script: "
+                       (lambda (str pred
+                               action)
+                         (if
+                             (eq action
+                                 'metadata)
+                             `(metadata
+                               (annotation-function
+                                . ,annotf))
+                           (complete-with-action
+                            action scripts
+                            str
+                            pred)))))))
+
 (defun yarn-stringify (x)
   "Convert X to string effeciently.
 X can be any object."
@@ -784,16 +809,17 @@ This function uses `yarn-common-buffer-name-function'."
                        (when (and (not env) nvm-version)
                          (prog1 process-environment
                            (minibuffer-message
-                            "Warning: Mismatched node version"))))))
-        (buff-name (yarn-common--generate-buffer-name-function
-                    (yarn-get-project-root) npm-command)))
-    (with-current-buffer (get-buffer-create buff-name)
-      (let* ((command npm-command)
-             (compilation-read-command nil)
-             (compilation-environment compenv)
-             (compile-command command))
-        (funcall-interactively #'compile command t)))))
-
+                            "Warning: Mismatched node version")))))))
+    (let* ((command npm-command)
+           (compilation-read-command nil)
+           (compilation-environment compenv)
+           (compile-command command)
+           (compilation-buffer-name-function
+            (lambda (_mode)
+              (format "*yarn:%s - %s*"
+                      (yarn-read-from-package-json 'name)
+                      npm-command))))
+      (compilation-start (concat "node -v && " command) t))))
 
 ;;;###autoload
 (defun yarn-unlink ()
@@ -1343,7 +1369,7 @@ With argument GLOBAL is non nil, globally."
 (defun yarn-run ()
   "Command dispatcher for yarn run."
   (interactive)
-  (let ((script (completing-read "Run: " (yarn-get-current-scripts))))
+  (let ((script (yarn-read-package-json-script)))
     (yarn-run-command (read-string "Run: "
                                    (concat "yarn run " script)))))
 
