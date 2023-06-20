@@ -995,9 +995,10 @@ INITIAL-INPUT can be given as the initial minibuffer input."
 (defun yarn-done ()
   "Execute yarn transient command."
   (interactive)
-  (let* ((args (when transient-current-command
-                 (transient-args
-                  transient-current-command)))
+  (let* ((args
+          (when transient-current-command
+            (transient-args
+             transient-current-command)))
          (cmd
           (pcase transient-current-command
             ('yarn-install "yarn install")
@@ -1019,8 +1020,8 @@ INITIAL-INPUT can be given as the initial minibuffer input."
             ('yarn-remove
              (string-join
               (append (list "yarn remove")
-                      (completing-read-multiple "Remove: "
-                                                (yarn-installed-completion-table)))
+                      (list (completing-read "Remove: "
+                                             (yarn-installed-completion-table))))
               "\s"))
             ('yarn-link
              (concat "yarn link "
