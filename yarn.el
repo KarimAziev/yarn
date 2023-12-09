@@ -129,7 +129,7 @@
 (require 'compile)
 
 (defconst yarn-nvm-version-re
-  "v[0-9]+\.[0-9]+\.[0-9]+"
+  "v[0-9]+\\.[0-9]+\\.[0-9]+"
   "Regex matching a Node version.")
 
 (defcustom yarn-nvm-dir (expand-file-name "~/.nvm")
@@ -152,7 +152,7 @@
               path)))))
 
 (defun yarn-nvm--installed-versions-dirs ()
-  "Return list of directories with installed versions of node."
+  "List Node.js version directories from NVM."
   (let* ((files (mapcan
                  (lambda (versions-dir)
                    (directory-files versions-dir t
@@ -177,7 +177,7 @@
      files)))
 
 (defun yarn-nvm--installed-versions ()
-  "Return list of directories with installed versions of node."
+  "List installed Node.js versions with their directories."
   (mapcar (lambda (it)
             (cons (file-name-nondirectory it) it))
           (yarn-nvm--installed-versions-dirs)))
@@ -210,7 +210,7 @@ SHORT is a string containing major and optionally minor version.
 This function will return the most recent version whose major
 and (if supplied, minor) match."
   (when (and short
-             (string-match-p "v?[0-9]+\\(\.[0-9]+\\(\.[0-9]+\\)?\\)?$" short))
+             (string-match-p "v?[0-9]+\\(\\.[0-9]+\\(\\.[0-9]+\\)?\\)?$" short))
     (unless (or (string-prefix-p "v" short)
                 (string-prefix-p "node" short)
                 (string-prefix-p "iojs" short))
@@ -539,15 +539,13 @@ Return full path of containing directory or nil."
    "package.json"))
 
 (defun yarn-get-package-json-path ()
-  "Look up directory hierarchy for directory containing package.json.
-Return absolute path to package.json or nil."
+  "Find and return the path to `package.json' in the project root."
   (when-let ((project-root (yarn-get-project-root)))
     (expand-file-name "package.json"
                       project-root)))
 
 (defun yarn-get-node-modules-paths ()
-  "Look up directory hierarchy for directory containing package.json.
-Return absolute path to package.json or nil."
+  "Find and return the path to `node_modules' in the project."
   (when-let ((project-root (locate-dominating-file
                             default-directory
                             "node_modules")))
@@ -759,7 +757,7 @@ This function uses `yarn-common-buffer-name-function'."
                             (concat (or (getenv "NVM_DIR")
                                         (expand-file-name "~/.nvm"))
                                     "/\\(?:versions/node/\\|versions/io.js/\\)?")
-                            "v[0-9]+\.[0-9]+\.[0-9]+" "/bin/?$"))
+                            "v[0-9]+\\.[0-9]+\\.[0-9]+" "/bin/?$"))
            (new-bin-path (expand-file-name  "bin/" version-path))
            (paths
             (cons
@@ -787,14 +785,16 @@ This function uses `yarn-common-buffer-name-function'."
                                              (setq i (format "%s" i)))
                                            (string-trim i))
                                          (delq nil (flatten-list args))))))
-  (let ((compenv (let* ((nvm-version (yarn-get-nvm-node-version))
-                        (env (when nvm-version (yarn-compile-get-new-env
-                                                nvm-version))))
-                   (or env
-                       (when (and (not env) nvm-version)
-                         (prog1 process-environment
-                           (minibuffer-message
-                            "Warning: Mismatched node version")))))))
+  (let ((compenv
+         (let* ((nvm-version (yarn-get-nvm-node-version))
+                (env
+                 (when nvm-version (yarn-compile-get-new-env
+                                    nvm-version))))
+           (or env
+               (when (and (not env) nvm-version)
+                 (prog1 process-environment
+                   (minibuffer-message
+                    "Warning: Mismatched node version")))))))
     (let* ((command npm-command)
            (compilation-read-command nil)
            (compilation-environment compenv)
@@ -804,7 +804,7 @@ This function uses `yarn-common-buffer-name-function'."
               (format "*yarn:%s - %s*"
                       (yarn-read-from-package-json 'name)
                       npm-command))))
-      (compilation-start (concat "node -v && " command) t))))
+      (compilation-start (concat "node -v && " command) nil))))
 
 ;;;###autoload
 (defun yarn-unlink ()
@@ -1041,7 +1041,7 @@ INITIAL-INPUT can be given as the initial minibuffer input."
 
 ;;;###autoload (autoload 'yarn-audit "yarn-yarn.el" nil t)
 (transient-define-prefix yarn-audit ()
-  "Command dispatcher for yarn audit options."
+  "Configure yarn audit command options."
   ["Options"
    [("l" "Level" yarn-level-options)
     ("g" "Groups " "--groups "
@@ -1054,7 +1054,7 @@ INITIAL-INPUT can be given as the initial minibuffer input."
 
 ;;;###autoload (autoload 'yarn-add "yarn" nil t)
 (transient-define-prefix yarn-add ()
-  "Command dispatcher for yarn add options."
+  "Define transient prefix for adding dependencies with Yarn."
   ["Options"
    [("-d" "devDependencies " "--dev")
     ("-p" "peerDependencies" "--peer")
@@ -1068,7 +1068,7 @@ INITIAL-INPUT can be given as the initial minibuffer input."
 
 ;;;###autoload
 (defun yarn-bin ()
-  "Command dispatcher for yarn audit options."
+  "Execute a Yarn bin command with user input."
   (interactive)
   (yarn-run-command (read-string "Run: "
                                  "yarn bin")))
@@ -1239,14 +1239,14 @@ With argument GLOBAL is non nil, globally."
 
 ;;;###autoload
 (defun yarn-generate-lock-entry ()
-  "Command dispatcher for yarn generate-lock-entry."
+  "Generate a Yarn lockfile entry by running a command."
   (interactive)
   (yarn-run-command (read-string "Run: "
                                  "yarn generate-lock-entry")))
 
 ;;;###autoload
 (defun yarn-help ()
-  "Command dispatcher for yarn generate-lock-entry."
+  "Execute `yarn help` with a user-specified command."
   (interactive)
   (yarn-run-command (read-string "Run: "
                                      "yarn help")))
@@ -1295,12 +1295,14 @@ With argument GLOBAL is non nil, globally."
    [("p" "private" "--private")
     ("y" "yes" "--yes")]]
   [("RET" "Run" yarn-done)])
+
 ;;;###autoload (autoload 'yarn-info "yarn-yarn.el" nil t)
 (transient-define-prefix yarn-info ()
   "Command dispatcher for yarn info."
   ["Options"
    [("j" "json" "--json")]]
   [("RET" "Run" yarn-done)])
+
 ;;;###autoload (autoload 'yarn-upgrade "yarn-yarn.el" nil t)
 (transient-define-prefix yarn-upgrade ()
   "Command dispatcher for yarn upgrade options."
@@ -1321,18 +1323,20 @@ With argument GLOBAL is non nil, globally."
     ("-p" "peerDependencies" "--peer")
     ("-o" "optional" "--optional")]]
   [("RET" "Run" yarn-done)])
+
 ;;;###autoload (autoload 'yarn-link "yarn-yarn.el" nil t)
 (transient-define-prefix yarn-link ()
-  "Command dispatcher for yarn add options."
+  "Define transient prefix for `yarn link` with directory option."
   ["Options"
    [("-l" "Link folder" "--link-folder "
      :class transient-option
      :reader transient-read-directory
      :prompt "Directory: ")]]
   [("RET" "Run" yarn-done)])
+
 ;;;###autoload (autoload 'yarn-upgrade-interactive "yarn-yarn.el" nil t)
 (transient-define-prefix yarn-upgrade-interactive ()
-  "Command dispatcher for yarn add options."
+  "Define a transient prefix for `yarn upgrade-interactive`."
   ["Options"
    [("-l" "Latest" "--latest")]]
   [("RET" "Run" yarn-done)])
