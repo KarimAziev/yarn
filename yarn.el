@@ -556,18 +556,15 @@ Return absolute path to package.json or nil."
 
 (defun yarn-read-from-package-json (key)
   "Return value of KEY from package.json."
-  (let* ((package-json-path (yarn-get-package-json-path))
-         (package-json (yarn-read-json package-json-path 'alist)))
+  (when-let* ((package-json-path (yarn-get-package-json-path))
+              (package-json (yarn-read-json package-json-path 'alist)))
     (alist-get key package-json)))
 
 (defun yarn-jest-installed-p ()
-  "Return t if jest can be run in the current project."
-  (when-let* ((node-modules (yarn-get-node-modules-path))
-              (package-json-path (yarn-get-package-json-path))
-              (package-json (yarn-read-json package-json-path 'alist))
-              (scripts (alist-get 'scripts package-json)))
-    (and (alist-get 'test scripts)
-         (not (null (member "jest" (directory-files node-modules)))))))
+  "Return non nil if jest can be run in the current project."
+  (assq 'jest (yarn-get-dependencies-alist)))
+
+
 
 (defun yarn-jest-current-file-cmd ()
   "Return string with jest command for testing current file."
@@ -578,44 +575,32 @@ Return absolute path to package.json or nil."
                           (regexp-quote project-root)
                           ""
                           (abbreviate-file-name file)))))
-      (yarn-add-props
-       (string-join (list
-                     "test"
-                     "--testPathPattern"
-                     path-pattern)
-                    "\s")
-       :description "Run jest on current file"))))
-
-(defun yarn-get-current-scripts ()
-  "Get current project scripts from package.json.
-Return list of strings, propertized with :description."
-  (when-let* ((package-json-path (yarn-get-package-json-path))
-              (package-json (yarn-read-json package-json-path 'alist))
-              (scripts (alist-get 'scripts package-json)))
-    (mapcar (lambda (it)
-              (yarn-add-props
-               (format "%s" (car it))
-               :description (format "%s:\s%s" (car it)
-                                    (cdr it))))
-            scripts)))
+      (cons (string-join
+             (list
+              "jest"
+              "--testPathPattern"
+              path-pattern)
+             "\s")
+            "Run jest on current file"))))
 
 (defun yarn-read-package-json-script ()
   "Get current project scripts from package.json.
 Return list of strings, propertized with :description."
-  (when-let* ((package-json-path (yarn-get-package-json-path))
-              (package-json (yarn-read-json package-json-path 'alist))
-              (scripts (alist-get 'scripts package-json)))
+  (let* ((package-json-path (yarn-get-package-json-path))
+         (package-json (yarn-read-json package-json-path 'alist))
+         (scripts (alist-get 'scripts package-json)))
+    (when-let ((jest-test (yarn-jest-current-file-cmd)))
+      (setq scripts (append scripts
+                            (list jest-test))))
     (let ((annotf
            (lambda (it)
-             (concat ": "
-                     (cdr
-                      (assoc
-                       (intern
-                        it)
-                       scripts))))))
+             (if-let ((description (or (alist-get it scripts)
+                                       (alist-get (intern it) scripts))))
+                 (concat ": " description)
+               ""))))
       (completing-read "Script: "
                        (lambda (str pred
-                               action)
+                                    action)
                          (if
                              (eq action
                                  'metadata)
