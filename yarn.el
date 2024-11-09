@@ -166,7 +166,7 @@
                                yarn-nvm-dir)))))))
     (mapcan
      (lambda (it)
-       (when-let ((name (when (file-directory-p it)
+       (when-let* ((name (when (file-directory-p it)
                           (file-name-nondirectory
                            (directory-file-name
                             it)))))
@@ -346,7 +346,7 @@ INITIAL-INPUT can be given as the initial minibuffer input."
 
 (defun yarn-get-nvm-node-version ()
   "Lookup and read .nvmrc file."
-  (when-let ((nvmrc (locate-dominating-file default-directory ".nvmrc")))
+  (when-let* ((nvmrc (locate-dominating-file default-directory ".nvmrc")))
     (with-temp-buffer (insert-file-contents (expand-file-name ".nvmrc" nvmrc))
                       (string-trim (buffer-substring-no-properties (point-min)
                                                                    (point-max))))))
@@ -370,7 +370,7 @@ INITIAL-INPUT can be given as the initial minibuffer input."
 
 (defun yarn-nvm-command (command &rest args)
   "Run nvm COMMAND with ARGS if nvm directory exists."
-  (when-let ((nvm-path (yarn-nvm-path)))
+  (when-let* ((nvm-path (yarn-nvm-path)))
     (yarn-exec-with-args "source" nvm-path
                              "&&" "nvm" command args)))
 
@@ -383,7 +383,7 @@ INITIAL-INPUT can be given as the initial minibuffer input."
 (defun yarn-ensure-nvm-node-installed (&optional force)
   "Install node version specified in nvmrc file of PROJECT.
 If FORCE is non nil, install it even if it is installed."
-  (when-let ((nvm-node-version (yarn-get-nvm-node-version)))
+  (when-let* ((nvm-node-version (yarn-get-nvm-node-version)))
     (let ((regex (regexp-quote nvm-node-version))
           (versions (yarn-nvm-installed-node-versions)))
       (when (and
@@ -400,7 +400,7 @@ If FORCE is non nil, install it even if it is installed."
 
 (defun yarn-ensure-nvm-use (command)
   "If PROJECT can use nvm, prepend to COMMAND nvm use."
-  (if-let ((nvm-path (and
+  (if-let* ((nvm-path (and
                       yarn-use-nvm
                       (yarn-get-nvm-node-version)
                       (yarn-nvm-path))))
@@ -410,7 +410,7 @@ If FORCE is non nil, install it even if it is installed."
 
 (defun yarn-expand-when-exists (filename &optional directory)
   "Expand FILENAME to DIRECTORY and return result if exists."
-  (when-let ((file (expand-file-name filename directory)))
+  (when-let* ((file (expand-file-name filename directory)))
     (when (file-exists-p file)
       file)))
 
@@ -484,12 +484,12 @@ If FORCE is non nil, install it even if it is installed."
         (tramp-mode (and tramp-mode (file-remote-p
                                      (expand-file-name directory)))))
     (dolist (file (delete ".." (delete "." (directory-files directory))))
-      (when-let ((full-file (unless (member file '(".git" ".github"))
+      (when-let* ((full-file (unless (member file '(".git" ".github"))
                               (concat directory file))))
         (when (file-directory-p full-file)
           (if (file-symlink-p full-file)
               (push full-file result)
-            (when-let ((dirs (yarn-list-symlinked-dirs-recursively
+            (when-let* ((dirs (yarn-list-symlinked-dirs-recursively
                               full-file)))
               (setq result (nconc result dirs)))))))
     result))
@@ -508,7 +508,7 @@ Only those packages includes that listed in package.json."
         (dependencies (mapcar #'car (yarn-get-dependencies-alist)))
         (links))
     (dolist (package-name dependencies)
-      (when-let ((dir (yarn-expand-when-exists (format "%s" package-name)
+      (when-let* ((dir (yarn-expand-when-exists (format "%s" package-name)
                                                    node-modules)))
         (when (file-symlink-p dir)
           (push (format "%s" package-name) links))))
@@ -516,7 +516,7 @@ Only those packages includes that listed in package.json."
 
 (defun yarn-find-global-links ()
   "Return linked packages in `yarn-global-config-directory' directory."
-  (when-let ((links-dir
+  (when-let* ((links-dir
               (when yarn-global-config-directory
                 (yarn-expand-when-exists
                  "link"
@@ -526,7 +526,7 @@ Only those packages includes that listed in package.json."
 (defun yarn-get-node-modules-path ()
   "Look up directory hierarchy for directory containing node_modules.
 Return absolute path to node_modules or nil."
-  (when-let ((project-root (locate-dominating-file
+  (when-let* ((project-root (locate-dominating-file
                             default-directory
                             "node_modules")))
     (expand-file-name "node_modules" project-root)))
@@ -540,13 +540,13 @@ Return full path of containing directory or nil."
 
 (defun yarn-get-package-json-path ()
   "Find and return the path to `package.json' in the project root."
-  (when-let ((project-root (yarn-get-project-root)))
+  (when-let* ((project-root (yarn-get-project-root)))
     (expand-file-name "package.json"
                       project-root)))
 
 (defun yarn-get-node-modules-paths ()
   "Find and return the path to `node_modules' in the project."
-  (when-let ((project-root (locate-dominating-file
+  (when-let* ((project-root (locate-dominating-file
                             default-directory
                             "node_modules")))
     (expand-file-name "node_modules"
@@ -566,7 +566,7 @@ Return full path of containing directory or nil."
 
 (defun yarn-jest-current-file-cmd ()
   "Return string with jest command for testing current file."
-  (when-let ((file (or buffer-file-name default-directory))
+  (when-let* ((file (or buffer-file-name default-directory))
              (project-root (yarn-get-project-root)))
     (let ((path-pattern (shell-quote-argument
                          (replace-regexp-in-string
@@ -587,12 +587,12 @@ Return list of strings, propertized with :description."
   (let* ((package-json-path (yarn-get-package-json-path))
          (package-json (yarn-read-json package-json-path 'alist))
          (scripts (alist-get 'scripts package-json)))
-    (when-let ((jest-test (yarn-jest-current-file-cmd)))
+    (when-let* ((jest-test (yarn-jest-current-file-cmd)))
       (setq scripts (append scripts
                             (list jest-test))))
     (let ((annotf
            (lambda (it)
-             (if-let ((description (or (alist-get it scripts)
+             (if-let* ((description (or (alist-get it scripts)
                                        (alist-get (intern it) scripts))))
                  (concat ": " description)
                ""))))
@@ -642,7 +642,7 @@ X can be any object."
   "Confirm PACKAGE version with PROMPT."
   (let ((version))
     (unless (string-match-p "[a-z-]+@" package)
-      (when-let ((versions (seq-reduce
+      (when-let* ((versions (seq-reduce
                             (lambda (acc it)
                               (let ((prefixes '("^" ">="))
                                     (l `(,it)))
@@ -969,7 +969,7 @@ INITIAL-INPUT can be given as the initial minibuffer input."
 (defun yarn-run-command (command &optional project)
   "Run COMMAND in PROJECT using vterm or asynchronously."
   (let ((default-directory (or project
-                               (when-let ((package-json-file
+                               (when-let* ((package-json-file
                                            (yarn-get-package-json-path)))
                                  (file-name-directory package-json-file))
                                (vc-root-dir)
@@ -1383,7 +1383,7 @@ With argument GLOBAL is non nil, globally."
   (let
       ((pacakge
         (completing-read ""
-                         (when-let ((node-modules
+                         (when-let* ((node-modules
                                      (yarn-get-node-modules-paths)))
                            (directory-files node-modules nil
                                             directory-files-no-dot-files-regexp)))))
